@@ -6,6 +6,27 @@ import os
 import sys
 
 
+def get_genes_in_stretch(chrom, start, end, gene_lookup_df):
+    """Given a stretch of DNA on a chromosome, figure out which genes are included in the segment and return an
+    ordered list based on the order the genes appear in the segment"""
+    genes_in_section = gene_lookup_df[(gene_lookup_df['chrom'] == chrom) &
+                                      (gene_lookup_df['start'] >= start) &
+                                      (gene_lookup_df['end'] <= end) &
+                                      (gene_lookup_df['section_genes'].notnull())]['section_genes']
+
+    # Some rows have multiple genes, so this list is still not totally collapsed yet
+    nested_gene_list = [glist.split(',') for glist in list(genes_in_section)]
+
+    # We use a list instead of a set here so we can preserve the order of genes as they appear on the segment
+    flat_gene_set = []
+    for gene_sublist in nested_gene_list:
+        for gene in gene_sublist:
+            if gene not in flat_gene_set:
+                flat_gene_set.append(gene)
+
+    return flat_gene_set
+
+
 def get_band_info(cytoband_dict, chrom, position):
     """Retrieve the arm and band-level information given a chromosome and position"""
     bands = cytoband_dict['chr{}'.format(chrom)]
@@ -33,15 +54,17 @@ def build_cytoband_dict():
 
     return cytoband_dict
 
-def get_genes_in_band(chrom, band_start, band_end, ref_genes_lookup):
-
 
 def add_band_and_arm_columns(input_df, chr_header, start_header, end_header, ref_genes_lookup=None):
     cytoband_dict = build_cytoband_dict()
-    band_info = [get_band_info(cytoband_dict, r[chr_header], (int(r[end_header]) - int(r[start_header]))/2.0) for index, r in
+    band_info = [get_band_info(cytoband_dict, r[chr_header], r[start_header]) for index, r in
                  input_df.iterrows()]
     input_df['band'] = pd.Series([b['band'] for b in band_info], index=input_df.index)
     input_df['arm'] = pd.Series([b['arm'] for b in band_info], index=input_df.index)
+
+    if ref_genes_lookup is not None:
+        sys.stdout.write("Adding gene information...")
+        input_df['genes'] = pd.Series([','.join(get_genes_in_stretch('chr{}'.format(r[chr_header]), r[start_header], r[end_header], ref_genes_lookup)) for i, r in input_df.iterrows()])
 
     return input_df
 
@@ -74,12 +97,13 @@ def get_stats(arm_band_df, chr_header, label_column):
     return arm_level_summary_dict, band_level_summary_dict, label_counts
 
 
-def import_ref_genes_linear_lookup():
+def load_ref_genes_lookup():
+    sys.stdout.write("Reading in ref genes linear lookup table...\n")
     package_path = os.path.dirname(os.path.realpath(__file__))
-    ref_genes_lookup_filepath = os.path.join(package_path, 'data/refGene_hg19_linear_lookup.txt')
-    ref_genes_lookup_df = pd.read_csv(ref_genes_lookup_filepath, sep='\t', header=0)
-    return ref_genes_lookup_df
-
+    # read in linear gene lookup table
+    gene_lookup_filepath = os.path.join(package_path, 'data/refGene_hg19_linear_lookup.txt')
+    ref_genes_lookup = pd.read_csv(gene_lookup_filepath, sep='\t', header=0)
+    return ref_genes_lookup
 
 def main():
     parser = ArgumentParser(description='Add arm and band-level information columns')
@@ -111,11 +135,7 @@ def main():
     sys.stdout.write("Reading in input file {}...\n".format(filename))
     input_df = pd.read_csv(input_file, delimiter='\t', skiprows=skiprows, comment='#')
 
-    ref_genes_lookup = None
-    if include_genes:
-        sys.stdout.write("Reading in ref genes linear lookup table...\n")
-        ref_genes_lookup = import_ref_genes_linear_lookup()
-
+    ref_genes_lookup = load_ref_genes_lookup() if include_genes else None
     sys.stdout.write("Adding arm-level and band-level information...\n")
     updated_df = add_band_and_arm_columns(input_df, chr_header, start_header, end_header,
                                           ref_genes_lookup=ref_genes_lookup)
