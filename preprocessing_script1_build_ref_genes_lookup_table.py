@@ -13,8 +13,6 @@ def build_ref_genes_lookup():
 
     ref_genes_lookup = defaultdict(list)
 
-    i = 0
-
     segment_by_id = {}
     for index, row in ref_genes_df.iterrows():
         chrom = row['chrom']
@@ -23,11 +21,12 @@ def build_ref_genes_lookup():
 
         symbol = row['name2']
 
+        # Store segment start and stop events as we progress down the chromosome
         ref_genes_lookup[chrom].append({'id': index, 'position': tx_start, 'type': START, 'symbol': symbol})
         ref_genes_lookup[chrom].append({'id': index, 'position': tx_end, 'type': END, 'symbol': symbol})
-        segment_by_id[index] = {'start': tx_start, 'end': tx_end, 'symbol': symbol}
 
-        i += 1
+        # Store a reference to the segment by its ID
+        segment_by_id[index] = {'start': tx_start, 'end': tx_end, 'symbol': symbol}
 
     # Make sure all the gene segment starts and ends are sorted in ascending order for each chromosome
     for chromosome in ref_genes_lookup.keys():
@@ -36,6 +35,8 @@ def build_ref_genes_lookup():
         ref_genes_lookup[chromosome] = sorted_starts_and_ends
 
     entries = []
+    # March down the segments from start to end of chromosome, at each interval figuring out which genes are currently
+    # included and storing this information in the entries array
     for chromosome, segments in ref_genes_lookup.items():
         current_segments = set()
         current_left_bookend = 0
@@ -44,25 +45,32 @@ def build_ref_genes_lookup():
             segment_id = segment.get('id')
             segment_type = segment.get('type')
             position = segment.get('position')
+
+            # Based on which segments are currently visible in our sliding window, figure out which genes are present
             current_gene_symbols_in_this_section = \
                 set([segment_by_id[segment_id].get('symbol') for segment_id in current_segments])
+
             entry = '{}\t{}\t{}\t{}'.format(chromosome, current_left_bookend, position,
                                             ','.join(list(current_gene_symbols_in_this_section)))
 
             if segment_type == START:
+                # Each time we increase our current position, our window has slid to the right and we should adjust
+                # our leftmost bound as well as recording what genes are present in this new window
                 if position > current_left_bookend:
                     current_left_bookend = position
                     entries.append(entry)
-                else:
-                    pass
+
+                # Add the segment to be included in our sliding window
                 current_segments.add(segment_id)
 
             if segment_type == END:
-                # Update our sliding window to be just where we left off
+                # Similar logic here: update our sliding window to be just where we left off, also record which genes
+                # were present
                 if current_left_bookend < position:
                     current_left_bookend = position
                     entries.append(entry)
 
+                # Remove the segment that has just exited our sliding window
                 current_segments.remove(segment_id)
 
     return entries

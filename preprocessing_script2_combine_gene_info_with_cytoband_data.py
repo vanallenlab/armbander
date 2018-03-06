@@ -1,5 +1,4 @@
 import os
-from collections import defaultdict
 import pandas as pd
 
 chr_index = 0
