@@ -31,8 +31,15 @@ def get_band_info(cytoband_dict, chrom, position):
     """Retrieve the arm and band-level information given a chromosome and position"""
     bands = cytoband_dict['chr{}'.format(chrom)]
     index = np.searchsorted([b['start'] for b in bands], position)
-    band = bands[index - 1]
-    return band
+
+    # First check that we're not on the left-most edge of a bucket, if so we should just use that bucket instead of the
+    # one to the left of it (for example, position 0 on first bucket should just be placed in the first bucket)
+    if index <= len(bands) - 1 and bands[index]['start'] == position:
+        print(bands[index])
+        return bands[index]
+    else:
+        print(bands[index - 1])
+        return bands[index - 1]
 
 
 def build_cytoband_dict():
@@ -59,13 +66,18 @@ def add_band_and_arm_columns(input_df, chr_header, start_header, end_header, ref
     cytoband_dict = build_cytoband_dict()
     band_info = [get_band_info(cytoband_dict, r[chr_header], r[start_header]) for index, r in
                  input_df.iterrows()]
+
+    sys.stdout.write("Done fetching cytoband information...\n")
     input_df['band'] = pd.Series([b['band'] for b in band_info], index=input_df.index)
+    sys.stdout.write("Done adding band information...\n")
     input_df['arm'] = pd.Series([b['arm'] for b in band_info], index=input_df.index)
+    sys.stdout.write("Done adding arm information...\n")
 
     if ref_genes_lookup is not None:
-        sys.stdout.write("Adding gene information...")
+        sys.stdout.write("Adding gene information...\n")
         input_df['genes'] = pd.Series([','.join(get_genes_in_stretch('chr{}'.format(r[chr_header]), r[start_header], r[end_header], ref_genes_lookup)) for i, r in input_df.iterrows()])
-
+        sys.stdout.write('Add gene count info...\n')
+        input_df['gene_count'] = pd.Series([len(r['genes'].split(',')) if r['genes'].strip() != '' else 0 for i, r in input_df.iterrows()])
     return input_df
 
 
